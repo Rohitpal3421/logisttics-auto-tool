@@ -114,22 +114,22 @@ elif option == "Fast PDF Merger":
         else:
             st.error("Please upload PDF files to proceed.")
 
-# --- MODULE 3: SKU SEQUENCE SORTER ---
-elif option == "SKU Sequence Sorter":
-    st.title("🔀 SKU-Based Intelligent Sorting")
-    st.write("Automated Label Sorting System")
+# --- MODULE 3: Invoice SEQUENCE SORTER ---
+elif option == "Invoice Sequence Sorter":
+    st.title("🔀 Invoice-Based Intelligent Sorting")
+    st.write("Automated Invoice Sorting System")
 
     col1, col2 = st.columns(2)
     with col1:
-        label_pdf = st.file_uploader("Upload Bulk Labels (PDF)", type="pdf")
+        Invoice_pdf = st.file_uploader("Upload Bulk Invoice (PDF)", type="pdf")
     with col2:
-        sequence_csv = st.file_uploader("Upload SKU Sequence (CSV)", type="csv")
+        Invoice_csv = st.file_uploader("Upload Invoice Sequence (CSV)", type="csv")
 
     if st.button("Analyze & Sort"):
-        if label_pdf and sequence_csv:
+        if Invoice_pdf and sequence_csv:
             try:
                 df_Invoice = pd.read_csv(sequence_csv)
-                Invoice_col = 'SKU' if 'SKU' in df_Invoice.columns else df_Invoice.columns[0]
+                Invoice_col = 'Invoice' if 'SKU' in df_Invoice.columns else df_Invoice.columns[0]
                 Invoice_order = df_Invoice[Invoice_col].astype(str).tolist()
 
                 reader = PdfReader(label_pdf)
