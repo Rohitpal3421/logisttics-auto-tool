@@ -114,43 +114,43 @@ elif option == "Fast PDF Merger":
         else:
             st.error("Please upload PDF files to proceed.")
 
-# --- MODULE 3: Invoice SEQUENCE SORTER ---
-elif option == "Invoice Sequence Sorter":
-    st.title("🔀 Invoice-Based Intelligent Sorting")
-    st.write("Automated Invoice Sorting System")
+# --- MODULE 3: SKU SEQUENCE SORTER ---
+elif option == "SKU Sequence Sorter":
+    st.title("🔀 SKU-Based Intelligent Sorting")
+    st.write("Automated Label Sorting System")
 
     col1, col2 = st.columns(2)
     with col1:
-        Invoice_pdf = st.file_uploader("Upload Bulk Invoice (PDF)", type="pdf")
+        label_pdf = st.file_uploader("Upload Bulk Labels (PDF)", type="pdf")
     with col2:
-        Invoice_csv = st.file_uploader("Upload Invoice Sequence (CSV)", type="csv")
+        sequence_csv = st.file_uploader("Upload SKU Sequence (CSV)", type="csv")
 
     if st.button("Analyze & Sort"):
-        if Invoice_pdf and sequence_csv:
+        if label_pdf and sequence_csv:
             try:
-                df_Invoice = pd.read_csv(sequence_csv)
-                Invoice_col = 'Invoice' if 'SKU' in df_Invoice.columns else df_Invoice.columns[0]
-                Invoice_order = df_Invoice[Invoice_col].astype(str).tolist()
+                df_sku = pd.read_csv(sequence_csv)
+                sku_col = 'SKU' if 'SKU' in df_sku.columns else df_sku.columns[0]
+                sku_order = df_sku[sku_col].astype(str).tolist()
 
                 reader = PdfReader(label_pdf)
                 writer = PdfWriter()
                 
-                page_map = {Invoice: [] for Invoice in Invoice_order}
+                page_map = {sku: [] for sku in sku_order}
                 unmatched = []
 
                 for page in reader.pages:
                     content = page.extract_text() or ""
                     found = False
-                    for Invoice in Invoice_order:
-                        if Invoice in content:
-                            page_map[Invoice].append(page)
+                    for sku in sku_order:
+                        if sku in content:
+                            page_map[sku].append(page)
                             found = True
                             break
                     if not found:
                         unmatched.append(page)
 
-                for Invoice in Invoice_order:
-                    for p in page_map[Invoice]:
+                for sku in sku_order:
+                    for p in page_map[sku]:
                         writer.add_page(p)
                 
                 for p in unmatched:
