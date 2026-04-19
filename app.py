@@ -1,169 +1,111 @@
 import streamlit as st
 import pandas as pd
 import pdfplumber
-import fitz  # PyMuPDF
-from pypdf import PdfReader, PdfWriter
-import io
 import re
+import io
 
 # --- PAGE CONFIGURATION ---
-st.set_page_config(page_title="Logistics Automation | Rohit Pal", layout="wide", page_icon="📦")
+st.set_page_config(page_title="LogiSmart Pro | Rohit Pal", layout="wide", page_icon="📊")
 
-# --- USER AUTHENTICATION SYSTEM ---
-USER_DB = {
-    "rohit_pal": {"password": "admin@rohit", "plan": "Premium"},
-    "client_guest": {"password": "guest@123", "plan": "Free"}
-}
+st.sidebar.title("🚛 LogiSmart v6.0")
+st.sidebar.markdown("### Developer: **Rohit Pal**")
+st.sidebar.write("System: **Delivery to Contact Matcher**")
 
-def authenticate():
-    if "authenticated" not in st.session_state:
-        st.session_state["authenticated"] = False
-        st.session_state["user_plan"] = "Free"
+st.title("📊 Ceragem Delivery-Contact Reconciliation")
+st.info("Logic: Matching **Delivery No** (from PDF) with **Contact No** (from GI Report).")
 
-    if not st.session_state["authenticated"]:
-        st.sidebar.title("🔐 Secure Login")
-        st.sidebar.info("Developed by: Rohit Pal")
-        user = st.sidebar.text_input("Username")
-        pw = st.sidebar.text_input("Password", type="password")
+col1, col2 = st.columns(2)
+with col1:
+    uploaded_pdfs = st.file_uploader("1. Upload Invoices (PDF)", type="pdf", accept_multiple_files=True)
+with col2:
+    gi_file = st.file_uploader("2. Upload GI Report (Excel/CSV)", type=["xlsx", "csv"])
+
+if st.button("Run Reconciliation"):
+    if uploaded_pdfs and gi_file:
+        # --- 1. PDF EXTRACTION (Focus on Delivery No) ---
+        all_inv_data = []
+        for pdf_file in uploaded_pdfs:
+            with pdfplumber.open(pdf_file) as pdf:
+                for page in pdf.pages:
+                    text = page.extract_text()
+                    if text:
+                        # Extracting Delivery No (Pattern: Delivery no : 8XXXXXXXX)
+                        delivery_match = re.search(r"Delivery\s*no\s*[:.]?\s*(\d+)", text, re.IGNORECASE)
+                        
+                        # Other details for the MIS
+                        inv_no = re.search(r"(?:Serial No\. Of Challan|RAL-)\s*[:.]?\s*([\w-]+)", text)
+                        order_no = re.search(r"S\.Order No\s*(\d+)", text)
+                        date_match = re.search(r"Date of Challan\s*([\d\w-]+)", text)
+                        
+                        if delivery_match:
+                            del_no = delivery_match.group(1).strip()
+                            all_inv_data.append({
+                                "Delivery No": del_no,
+                                "Invoice No": inv_no.group(1) if inv_no else pdf_file.name.replace(".pdf",""),
+                                "S.Order No": order_no.group(1) if order_no else "",
+                                "Invoice Date": date_match.group(1) if date_match else ""
+                            })
         
-        if st.sidebar.button("Login"):
-            if user in USER_DB and USER_DB[user]["password"] == pw:
-                st.session_state["authenticated"] = True
-                st.session_state["user_plan"] = USER_DB[user]["plan"]
-                st.session_state["username"] = user
-                st.rerun()
-            else:
-                st.sidebar.error("Invalid credentials. Please contact Rohit Pal.")
-        st.stop() 
-
-authenticate()
-
-# --- SIDEBAR NAVIGATION ---
-st.sidebar.success(f"Welcome, {st.session_state['username']}")
-st.sidebar.write(f"Account Status: **{st.session_state['user_plan']}**")
-
-option = st.sidebar.radio(
-    "Select Module",
-    ("Excel MIS Extractor", "Fast PDF Merger", "SKU Sequence Sorter")
-)
-
-if st.sidebar.button("Logout"):
-    st.session_state["authenticated"] = False
-    st.rerun()
-
-# --- MODULE 1: EXCEL MIS EXTRACTOR ---
-if option == "Excel MIS Extractor":
-    st.title("📄 Invoice Data Extraction (MIS)")
-    st.markdown("#### System Provider: **Rohit Pal**")
-    
-    if st.session_state["user_plan"] != "Premium":
-        st.warning("🔒 This is a Premium Feature. Please contact Rohit Pal for access.")
-    else:
-        uploaded_files = st.file_uploader("Upload PDF Invoices", type="pdf", accept_multiple_files=True)
+        df_pdf = pd.DataFrame(all_inv_data).drop_duplicates(subset=["Delivery No"])
         
-        if st.button("Generate Report"):
-            if uploaded_files:
-                all_rows = []
-                for uploaded_file in uploaded_files:
-                    with pdfplumber.open(uploaded_file) as pdf:
-                        for page in pdf.pages:
-                            text = page.extract_text()
-                            if text:
-                                inv_no = re.search(r"Serial No\. Of Invoice\s*:\s*([\w-]+)", text)
-                                order_no = re.search(r"S\.Order No\s*:\s*(\d+)", text)
-                                delivery_no = re.search(r"Delivery no\s*:\s*(\d+)", text)
-                                invoice_val = re.search(r"Total Invoice Value \(In figure\)\s*:\s*([\d,.]+)", text)
-                                
-                                if order_no:
-                                    all_rows.append({
-                                        "Invoice No": inv_no.group(1) if inv_no else "N/A",
-                                        "Order No": order_no.group(1),
-                                        "Delivery No": delivery_no.group(1) if delivery_no else "N/A",
-                                        "Value": invoice_val.group(1) if invoice_val else "0"
-                                    })
-                
-                if all_rows:
-                    df = pd.DataFrame(all_rows).drop_duplicates()
-                    st.dataframe(df, use_container_width=True)
-                    
-                    output = io.BytesIO()
-                    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                        df.to_excel(writer, index=False)
-                    st.download_button("📥 Download Excel Report", data=output.getvalue(), file_name="MIS_Report_RohitPal.xlsx")
-            else:
-                st.error("No files uploaded.")
-
-# --- MODULE 2: FAST PDF MERGER ---
-elif option == "Fast PDF Merger":
-    st.title("🔗 Fast PDF Merger")
-    st.write("Merge documents instantly. Powered by Rohit Pal.")
-    
-    uploaded_pdfs = st.file_uploader("Select PDF Files", type="pdf", accept_multiple_files=True)
-    
-    if st.button("Execute Merge"):
-        if uploaded_pdfs:
-            merged_pdf = fitz.open()
-            for pdf in uploaded_pdfs:
-                with fitz.open(stream=pdf.read(), filetype="pdf") as temp:
-                    merged_pdf.insert_pdf(temp)
-            
-            output_stream = io.BytesIO()
-            merged_pdf.save(output_stream)
-            st.success(f"Successfully merged {len(uploaded_pdfs)} documents.")
-            st.download_button("📥 Download Merged PDF", data=output_stream.getvalue(), file_name="Merged_By_RohitPal.pdf")
+        # --- 2. GI REPORT PROCESSING ---
+        if gi_file.name.endswith('.csv'):
+            df_gi = pd.read_csv(gi_file)
         else:
-            st.error("Please upload PDF files to proceed.")
+            df_gi = pd.read_excel(gi_file)
+        
+        df_gi.columns = df_gi.columns.str.strip()
+        
+        # Finding the matching column in GI report (User said it's 'Contact No' here)
+        gi_match_col = None
+        for col in ['Contact No', 'CONTACT', 'Mobile', 'Customer Contact']:
+            if col in df_gi.columns:
+                gi_match_col = col
+                break
+        
+        if gi_match_col:
+            # Clean both columns to ensure exact matching
+            df_gi[gi_match_col] = df_gi[gi_match_col].astype(str).str.extract('(\d+)')
+            df_pdf['Delivery No'] = df_pdf['Delivery No'].astype(str)
 
-# --- MODULE 3: SKU SEQUENCE SORTER ---
-elif option == "SKU Sequence Sorter":
-    st.title("🔀 SKU-Based Intelligent Sorting")
-    st.write("Automated Label Sorting System")
+            # --- 3. MERGING ON DELIVERY == CONTACT ---
+            final_df = pd.merge(df_pdf, df_gi, left_on='Delivery No', right_on=gi_match_col, how='left')
 
-    col1, col2 = st.columns(2)
-    with col1:
-        label_pdf = st.file_uploader("Upload Bulk Labels (PDF)", type="pdf")
-    with col2:
-        sequence_csv = st.file_uploader("Upload SKU Sequence (CSV)", type="csv")
+            # --- 4. FORMATTING ACCORDING TO SAMPLE ---
+            desired_columns = [
+                "Sr.No", "Invoice No.", "S. Order No.", "Invoice Date", "Delivery No",
+                "CUSTOMER_CODE", "Center Name", "Delivery location", "State", 
+                "PRODUCT_NAME", "GI_QTY", "Date of Dispatch", "TRACKING NO", 
+                "Courier Name", "Status", "Remark"
+            ]
 
-    if st.button("Analyze & Sort"):
-        if label_pdf and sequence_csv:
-            try:
-                df_sku = pd.read_csv(sequence_csv)
-                sku_col = 'SKU' if 'SKU' in df_sku.columns else df_sku.columns[0]
-                sku_order = df_sku[sku_col].astype(str).tolist()
+            # Mapping
+            final_df = final_df.rename(columns={
+                "Invoice No": "Invoice No.",
+                "S.Order No": "S. Order No.",
+                "TRACKING NO_y": "TRACKING NO",
+                "STATUS": "Status"
+            })
 
-                reader = PdfReader(label_pdf)
-                writer = PdfWriter()
-                
-                page_map = {sku: [] for sku in sku_order}
-                unmatched = []
+            # Add missing columns
+            for col in desired_columns:
+                if col not in final_df.columns:
+                    final_df[col] = ""
 
-                for page in reader.pages:
-                    content = page.extract_text() or ""
-                    found = False
-                    for sku in sku_order:
-                        if sku in content:
-                            page_map[sku].append(page)
-                            found = True
-                            break
-                    if not found:
-                        unmatched.append(page)
+            final_ordered_df = final_df[desired_columns]
 
-                for sku in sku_order:
-                    for p in page_map[sku]:
-                        writer.add_page(p)
-                
-                for p in unmatched:
-                    writer.add_page(p)
+            st.success(f"Matched {len(final_ordered_df)} records using Delivery <-> Contact logic.")
+            st.dataframe(final_ordered_df.head(20), use_container_width=True)
 
-                final_out = io.BytesIO()
-                writer.write(final_out)
-                st.success("Sequence Sorting Completed.")
-                st.download_button("📥 Download Sorted PDF", data=final_out.getvalue(), file_name="Sorted_Labels_RohitPal.pdf")
-            except Exception as e:
-                st.error(f"Sorting Error: {e}")
-
-# --- FOOTER ---
-st.sidebar.markdown("---")
-st.sidebar.caption("🚀 **Developer: Rohit Pal**")
-st.sidebar.caption("© 2026 Logistics Intelligence Portal")
+            # Download
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                final_ordered_df.to_excel(writer, index=False, sheet_name='Reconciled_Outward')
+            
+            st.download_button(
+                label="📥 Download Updated MIS",
+                data=output.getvalue(),
+                file_name="Ceragem_Delivery_Matched_MIS.xlsx"
+            )
+        else:
+            st.error("GI Report mein Matching column (Contact No) nahi mila.")
