@@ -2,38 +2,35 @@ import streamlit as st
 import pandas as pd
 import pdfplumber
 import fitz  # PyMuPDF
-from pypdf import PdfReader, PdfWriter
 import io
 import re
-import zipfile
 
 # --- PAGE CONFIGURATION ---
-st.set_page_config(page_title="LogiSmart Pro | Rohit Pal", layout="wide", page_icon="🚛")
+st.set_config(page_title="LogiSmart Pro | Rohit Pal", layout="wide", page_icon="🚛")
 
-st.sidebar.title("🚛 LogiSmart v6.5")
+# Sidebar - Navigations
+st.sidebar.title("🚛 LogiSmart v7.0")
 st.sidebar.markdown("### Developer: **Rohit Pal**")
 
-# Sidebar navigation - Saare options wapas lane ke liye
-option = st.sidebar.radio(
+option = st.sidebar.selectbox(
     "Select Operational Tool",
-    ("Delivery-Contact Matcher", "Dual-Set Invoice Matcher", "Fast PDF Merger", "MIS Data Extractor")
+    ("Delivery-Contact Matcher", "Fast PDF Merger", "MIS Data Extractor")
 )
 
-# --- MODULE 1: DELIVERY-CONTACT MATCHING (Ceragem Specific) ---
+# --- 1. DELIVERY-CONTACT MATCHER (Ceragem) ---
 if option == "Delivery-Contact Matcher":
-    st.title("📊 Ceragem Delivery-Contact Reconciliation")
+    st.title("📊 Ceragem Delivery-Contact Matcher")
     st.info("Logic: Matching Delivery No (PDF) with Contact No (GI Report).")
-
+    
     col1, col2 = st.columns(2)
     with col1:
-        uploaded_pdfs = st.file_uploader("1. Upload Invoices (PDF)", type="pdf", accept_multiple_files=True)
+        uploaded_pdfs = st.file_uploader("1. Upload Invoices (PDF)", type="pdf", accept_multiple_files=True, key="del_pdf")
     with col2:
-        gi_file = st.file_uploader("2. Upload GI Report (Excel/CSV)", type=["xlsx", "csv"])
+        gi_file = st.file_uploader("2. Upload GI Report (Excel/CSV)", type=["xlsx", "csv"], key="del_gi")
 
     if st.button("Run Reconciliation"):
         if uploaded_pdfs and gi_file:
             try:
-                # PDF Extraction logic
                 all_inv_data = []
                 for pdf_file in uploaded_pdfs:
                     with pdfplumber.open(pdf_file) as pdf:
@@ -43,77 +40,78 @@ if option == "Delivery-Contact Matcher":
                                 delivery_match = re.search(r"Delivery\s*no\s*[:.]?\s*(\d+)", text, re.IGNORECASE)
                                 inv_no = re.search(r"(?:Serial No\. Of Challan|RAL-)\s*[:.]?\s*([\w-]+)", text)
                                 order_no = re.search(r"S\.Order No\s*(\d+)", text)
-                                date_match = re.search(r"Date of Challan\s*([\d\w-]+)", text)
                                 
                                 if delivery_match:
                                     all_inv_data.append({
                                         "Delivery No": delivery_match.group(1).strip(),
-                                        "Invoice No.": inv_no.group(1) if inv_no else "",
-                                        "S. Order No.": order_no.group(1) if order_no else "",
-                                        "Invoice Date": date_match.group(1) if date_match else ""
+                                        "Invoice No.": inv_no.group(1) if inv_no else pdf_file.name,
+                                        "S. Order No.": order_no.group(1) if order_no else ""
                                     })
+                
                 df_pdf = pd.DataFrame(all_inv_data).drop_duplicates(subset=["Delivery No"])
 
-                # GI Report Reading (Using openpyxl engine)
+                # Reading GI Report
                 if gi_file.name.endswith('.csv'):
                     df_gi = pd.read_csv(gi_file)
                 else:
                     df_gi = pd.read_excel(gi_file, engine='openpyxl')
                 
                 df_gi.columns = df_gi.columns.str.strip()
-
-                # Matching Column Identification
-                gi_match_col = None
-                for col in ['Contact No', 'CONTACT', 'Mobile', 'Customer Contact']:
-                    if col in df_gi.columns:
-                        gi_match_col = col
-                        break
+                
+                # Matching Column
+                gi_match_col = next((c for c in ['CONTACT', 'Contact No', 'Mobile'] if c in df_gi.columns), None)
                 
                 if gi_match_col:
                     df_gi[gi_match_col] = df_gi[gi_match_col].astype(str).str.extract('(\d+)')
                     df_pdf['Delivery No'] = df_pdf['Delivery No'].astype(str)
 
-                    # Merge
                     final_df = pd.merge(df_pdf, df_gi, left_on='Delivery No', right_on=gi_match_col, how='left')
-                    
-                    # Exact Sample Sequence as requested
-                    desired_columns = ["Invoice No.", "S. Order No.", "Invoice Date", "Delivery No", "Status", "TRACKING NO", "Courier Name", "Remark"]
-                    for col in desired_columns:
-                        if col not in final_df.columns: final_df[col] = ""
-                    
-                    st.success("Matching Complete!")
-                    st.dataframe(final_df[desired_columns])
-                    
+                    st.success("Matching Completed!")
+                    st.dataframe(final_df)
+
                     output = io.BytesIO()
                     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                        final_df[desired_columns].to_excel(writer, index=False)
-                    st.download_button("📥 Download Result", data=output.getvalue(), file_name="Ceragem_Reconciled_MIS.xlsx")
+                        final_df.to_excel(writer, index=False)
+                    st.download_button("📥 Download Result", data=output.getvalue(), file_name="Ceragem_Match.xlsx")
+                else:
+                    st.error("GI Report mein Contact/Mobile column nahi mila.")
             except Exception as e:
                 st.error(f"Error: {e}")
 
-# --- MODULE 2: DUAL-SET MATCHER (Zip Based) ---
-elif option == "Dual-Set Invoice Matcher":
-    st.title("📂 Dual-Set Invoice & E-Way Bill Pairing")
-    # ... (Aapka purana ZIP matching code yahan insert karein)
-    st.warning("Please upload your ZIP files for Invoice and E-Way bill matching.")
-
-# --- MODULE 3: FAST PDF MERGER ---
+# --- 2. FAST PDF MERGER ---
 elif option == "Fast PDF Merger":
     st.title("🔗 Fast PDF Merger")
-    uploaded_pdfs = st.file_uploader("Upload PDFs", type="pdf", accept_multiple_files=True)
-    if st.button("Merge"):
-        if uploaded_pdfs:
-            merged = fitz.open()
-            for p in uploaded_pdfs:
-                with fitz.open(stream=p.read(), filetype="pdf") as t: merged.insert_pdf(t)
-            out = io.BytesIO()
-            merged.save(out)
-            st.download_button("Download Merged", out.getvalue(), "Merged.pdf")
+    st.write("Sare PDFs ek saath select karke merge karein.")
+    merge_files = st.file_uploader("Upload PDFs to Merge", type="pdf", accept_multiple_files=True, key="merger")
+    
+    if st.button("Merge Now"):
+        if merge_files:
+            merged_pdf = fitz.open()
+            for f in merge_files:
+                with fitz.open(stream=f.read(), filetype="pdf") as temp_pdf:
+                    merged_pdf.insert_pdf(temp_pdf)
+            
+            out_bio = io.BytesIO()
+            merged_pdf.save(out_bio)
+            st.success("Merged Successfully!")
+            st.download_button("📥 Download Merged PDF", data=out_bio.getvalue(), file_name="Combined_Invoices.pdf")
 
-# --- MODULE 4: MIS DATA EXTRACTOR ---
+# --- 3. MIS DATA EXTRACTOR ---
 elif option == "MIS Data Extractor":
-    st.title("📄 MIS Data Extractor (PDF to Excel)")
-    # ... (Aapka purana MIS extraction logic yahan insert karein)
+    st.title("📄 PDF to MIS Extractor")
+    st.write("Invoice PDFs se data nikal kar Excel banayein.")
+    mis_files = st.file_uploader("Upload Invoices", type="pdf", accept_multiple_files=True, key="mis_ext")
+    
+    if st.button("Extract Data"):
+        if mis_files:
+            # Basic extraction logic
+            data = []
+            for f in mis_files:
+                with pdfplumber.open(f) as pdf:
+                    text = pdf.pages[0].extract_text()
+                    inv = re.search(r"RAL-[\d]+", text)
+                    data.append({"File": f.name, "Invoice": inv.group(0) if inv else "N/A"})
+            st.table(data)
 
 st.sidebar.markdown("---")
-st.sidebar.caption("🚀 Developed by Rohit Pal")
+st.sidebar.info("Tip: Agar Error aaye toh 'requirements.txt' mein 'openpyxl' check karein.")
