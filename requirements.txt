@@ -4,4 +4,4 @@ pdfplumber
 pymupdf
 pypdf
 xlsxwriter
-google-generativeai
+openpyxl
