@@ -6,7 +6,7 @@ import io
 import re
 
 # --- PAGE CONFIGURATION ---
-st.set_config(page_title="LogiSmart Pro | Rohit Pal", layout="wide", page_icon="🚛")
+st.page_config(page_title="LogiSmart Pro | Rohit Pal", layout="wide", page_icon="🚛")
 
 # Sidebar - Navigations
 st.sidebar.title("🚛 LogiSmart v7.0")
