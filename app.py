@@ -4,113 +4,110 @@ import pdfplumber
 import fitz  # PyMuPDF
 import io
 import re
+import zipfile
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="LogiSmart Pro | Rohit Pal", layout="wide", page_icon="🚛")
-# Sidebar - Navigations
-st.sidebar.title("🚛 LogiSmart v7.0")
-st.sidebar.markdown("### Developer: **Rohit Pal**")
 
-option = st.sidebar.selectbox(
-    "Select Operational Tool",
-    ("Delivery-Contact Matcher", "Fast PDF Merger", "MIS Data Extractor")
-)
+st.sidebar.title("🚛 LogiSmart v3.5")
+st.sidebar.markdown("### Developed by: **Rohit Pal**")
+st.sidebar.write("System: **Dual-Set Invoice Matcher**")
 
-# --- 1. DELIVERY-CONTACT MATCHER (Ceragem) ---
-if option == "Delivery-Contact Matcher":
-    st.title("📊 Ceragem Delivery-Contact Matcher")
-    st.info("Logic: Matching Delivery No (PDF) with Contact No (GI Report).")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        uploaded_pdfs = st.file_uploader("1. Upload Invoices (PDF)", type="pdf", accept_multiple_files=True, key="del_pdf")
-    with col2:
-        gi_file = st.file_uploader("2. Upload GI Report (Excel/CSV)", type=["xlsx", "csv"], key="del_gi")
+# --- HELPER: EXTRACT INVOICE NO ---
+def extract_invoice_no(pdf_bytes):
+    try:
+        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+            for page in pdf.pages:
+                text = page.extract_text()
+                if text:
+                    # Logistics common patterns: INV, Serial No, or direct numbers
+                    match = re.search(r"(?:Invoice No|Inv No|Serial No|Invoice#)\s*[:.]?\s*([\w\-/]+)", text, re.IGNORECASE)
+                    if match:
+                        return match.group(1).strip()
+    except:
+        pass
+    return None
 
-    if st.button("Run Reconciliation"):
-        if uploaded_pdfs and gi_file:
-            try:
-                all_inv_data = []
-                for pdf_file in uploaded_pdfs:
-                    with pdfplumber.open(pdf_file) as pdf:
-                        for page in pdf.pages:
-                            text = page.extract_text()
-                            if text:
-                                delivery_match = re.search(r"Delivery\s*no\s*[:.]?\s*(\d+)", text, re.IGNORECASE)
-                                inv_no = re.search(r"(?:Serial No\. Of Challan|RAL-)\s*[:.]?\s*([\w-]+)", text)
-                                order_no = re.search(r"S\.Order No\s*(\d+)", text)
-                                
-                                if delivery_match:
-                                    all_inv_data.append({
-                                        "Delivery No": delivery_match.group(1).strip(),
-                                        "Invoice No.": inv_no.group(1) if inv_no else pdf_file.name,
-                                        "S. Order No.": order_no.group(1) if order_no else ""
-                                    })
-                
-                df_pdf = pd.DataFrame(all_inv_data).drop_duplicates(subset=["Delivery No"])
+st.title("📂 Automated Invoice & E-Way Bill Pairing (Double Set Mode)")
+st.info("How it works: It matches Invoice with E-Way Bill and creates **2 copies** of each pair automatically.")
 
-                # Reading GI Report
-                if gi_file.name.endswith('.csv'):
-                    df_gi = pd.read_csv(gi_file)
-                else:
-                    df_gi = pd.read_excel(gi_file, engine='openpyxl')
-                
-                df_gi.columns = df_gi.columns.str.strip()
-                
-                # Matching Column
-                gi_match_col = next((c for c in ['CONTACT', 'Contact No', 'Mobile'] if c in df_gi.columns), None)
-                
-                if gi_match_col:
-                    df_gi[gi_match_col] = df_gi[gi_match_col].astype(str).str.extract('(\d+)')
-                    df_pdf['Delivery No'] = df_pdf['Delivery No'].astype(str)
+col1, col2 = st.columns(2)
+with col1:
+    invoice_zip = st.file_uploader("Upload Invoices ZIP", type="zip")
+with col2:
+    eway_zip = st.file_uploader("Upload E-Way Bills ZIP (Optional)", type="zip")
 
-                    final_df = pd.merge(df_pdf, df_gi, left_on='Delivery No', right_on=gi_match_col, how='left')
-                    st.success("Matching Completed!")
-                    st.dataframe(final_df)
+if st.button("Process & Generate 2 Sets"):
+    if invoice_zip:
+        inv_dict = {}
+        eway_dict = {}
+        
+        # 1. Process Invoices
+        with zipfile.ZipFile(invoice_zip, 'r') as z:
+            for filename in z.namelist():
+                if filename.lower().endswith('.pdf'):
+                    data = z.read(filename)
+                    inv_no = extract_invoice_no(data)
+                    if inv_no:
+                        inv_dict[inv_no] = data
 
-                    output = io.BytesIO()
-                    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                        final_df.to_excel(writer, index=False)
-                    st.download_button("📥 Download Result", data=output.getvalue(), file_name="Ceragem_Match.xlsx")
-                else:
-                    st.error("GI Report mein Contact/Mobile column nahi mila.")
-            except Exception as e:
-                st.error(f"Error: {e}")
+        # 2. Process E-Way Bills
+        if eway_zip:
+            with zipfile.ZipFile(eway_zip, 'r') as z:
+                for filename in z.namelist():
+                    if filename.lower().endswith('.pdf'):
+                        data = z.read(filename)
+                        inv_no = extract_invoice_no(data)
+                        if inv_no:
+                            eway_dict[inv_no] = data
 
-# --- 2. FAST PDF MERGER ---
-elif option == "Fast PDF Merger":
-    st.title("🔗 Fast PDF Merger")
-    st.write("Sare PDFs ek saath select karke merge karein.")
-    merge_files = st.file_uploader("Upload PDFs to Merge", type="pdf", accept_multiple_files=True, key="merger")
-    
-    if st.button("Merge Now"):
-        if merge_files:
-            merged_pdf = fitz.open()
-            for f in merge_files:
-                with fitz.open(stream=f.read(), filetype="pdf") as temp_pdf:
-                    merged_pdf.insert_pdf(temp_pdf)
+        # 3. Match, Sequence, and Duplicate (2 Sets)
+        final_doc = fitz.open()
+        summary = []
+
+        for inv_no, inv_pdf in inv_dict.items():
+            # Create a temporary buffer for one complete set (Invoice + Eway)
+            temp_set = fitz.open()
             
-            out_bio = io.BytesIO()
-            merged_pdf.save(out_bio)
-            st.success("Merged Successfully!")
-            st.download_button("📥 Download Merged PDF", data=out_bio.getvalue(), file_name="Combined_Invoices.pdf")
+            # Add Invoice
+            with fitz.open(stream=inv_pdf, filetype="pdf") as f_inv:
+                temp_set.insert_pdf(f_inv)
+            
+            # Add Eway Bill if exists
+            has_eway = False
+            if inv_no in eway_dict:
+                with fitz.open(stream=eway_dict[inv_no], filetype="pdf") as f_eway:
+                    temp_set.insert_pdf(f_eway)
+                has_eway = True
+            
+            # Now add this set TWICE to the final document
+            final_doc.insert_pdf(temp_set) # Set 1
+            final_doc.insert_pdf(temp_set) # Set 2
+            
+            summary.append({
+                "Invoice No": inv_no,
+                "E-Way Bill": "✅ Found" if has_eway else "⚠️ Not Found",
+                "Sets Created": "2 Sets (Duplicate)"
+            })
+            temp_set.close()
 
-# --- 3. MIS DATA EXTRACTOR ---
-elif option == "MIS Data Extractor":
-    st.title("📄 PDF to MIS Extractor")
-    st.write("Invoice PDFs se data nikal kar Excel banayein.")
-    mis_files = st.file_uploader("Upload Invoices", type="pdf", accept_multiple_files=True, key="mis_ext")
-    
-    if st.button("Extract Data"):
-        if mis_files:
-            # Basic extraction logic
-            data = []
-            for f in mis_files:
-                with pdfplumber.open(f) as pdf:
-                    text = pdf.pages[0].extract_text()
-                    inv = re.search(r"RAL-[\d]+", text)
-                    data.append({"File": f.name, "Invoice": inv.group(0) if inv else "N/A"})
-            st.table(data)
+        if summary:
+            st.write("### Processing Summary")
+            st.table(pd.DataFrame(summary))
+            
+            output_pdf = io.BytesIO()
+            final_doc.save(output_pdf)
+            st.success("Successfully generated dual-set document!")
+            st.download_button(
+                label="📥 Download Final PDF (2 Sets Each)",
+                data=output_pdf.getvalue(),
+                file_name="RohitPal_DualSet_Invoices.pdf",
+                mime="application/pdf"
+            )
+        else:
+            st.error("No valid Invoice numbers found. Please check PDF quality.")
+    else:
+        st.warning("Please upload at least the Invoices ZIP file.")
 
-st.sidebar.markdown("---")
-st.sidebar.info("Tip: Agar Error aaye toh 'requirements.txt' mein 'openpyxl' check karein.")
+st.markdown("---")
+st.markdown("<center><b>Developed by Rohit Pal | Logistics Operations Automation</b></center>", unsafe_allow_html=True)
