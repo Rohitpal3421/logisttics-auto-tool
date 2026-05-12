@@ -1,59 +1,49 @@
-import os
-from flask import Flask, render_template, request, redirect, url_for
+import streamlit as st
 import pdfplumber
+import os
 
-app = Flask(__name__)
+st.set_page_config(page_title="Logistics PDF Auto-Tool", layout="wide")
 
-# Folder setup
-UPLOAD_FOLDER = 'uploads'
-if not os.path.exists(UPLOAD_FOLDER):
-    os.makedirs(UPLOAD_FOLDER)
+st.title("📄 PDF Data Extraction Tool")
+st.subheader("PDF upload karein aur zaroori data select karein")
 
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+# Sidebar for PDF Operations
+option = st.sidebar.selectbox("Kya karna chahte hain?", ["Data Extract Karna", "PDF Merge (Coming Soon)"])
 
-@app.route('/')
-def index():
-    return render_template('index.html')
+uploaded_file = st.file_uploader("Apni PDF file yahan drop karein", type="pdf")
 
-@app.route('/process', methods=['POST'])
-def process_pdf():
-    if 'file' not in request.files:
-        return "No file uploaded"
-    
-    file = request.files['file']
-    if file.filename == '':
-        return "No file selected"
+if uploaded_file is not None:
+    # PDF ko read karna
+    with pdfplumber.open(uploaded_file) as pdf:
+        all_text_lines = []
+        for page in pdf.pages:
+            text = page.extract_text()
+            if text:
+                all_text_lines.extend(text.split('\n'))
 
-    # File save karna
-    filepath = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
-    file.save(filepath)
+    if all_text_lines:
+        st.write("### PDF se nikala gaya data:")
+        st.info("Niche se wo lines select karein jo aapko chahiye.")
+        
+        # Checkboxes for each line
+        selected_data = []
+        
+        # 'Select All' button ka option
+        if st.checkbox("Sabhi lines select karein"):
+            selected_data = all_text_lines
+        else:
+            for i, line in enumerate(all_text_lines):
+                if st.checkbox(line, key=f"line_{i}"):
+                    selected_data.append(line)
 
-    extracted_data = []
-    try:
-        with pdfplumber.open(filepath) as pdf:
-            for page in pdf.pages:
-                text = page.extract_text()
-                if text:
-                    # PDF ki lines ko list mein convert karna
-                    extracted_data.extend(text.split('\n'))
-    except Exception as e:
-        return f"Error processing PDF: {str(e)}"
-    finally:
-        # File delete kar dena processing ke baad (Safety/Privacy ke liye)
-        if os.path.exists(filepath):
-            os.remove(filepath)
-
-    return render_template('options.html', lines=extracted_data)
-
-@app.route('/extract', methods=['POST'])
-def extract_selected():
-    selected_lines = request.form.getlist('selected_data')
-    if not selected_lines:
-        return "Aapne kuch bhi select nahi kiya!"
-    
-    return render_template('result.html', data=selected_lines)
-
-if __name__ == '__main__':
-    # GitHub Codespaces aur Cloud hosting ke liye zaroori
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port, debug=True)
+        # Final Extraction Result
+        if st.button("Final Data Copy Karein"):
+            if selected_data:
+                st.success("Aapka selected data niche hai:")
+                final_text = "\n".join(selected_data)
+                st.text_area("Selected Text:", value=final_text, height=300)
+                st.download_button("File Download Karein", final_text, file_name="extracted_data.txt")
+            else:
+                st.warning("Pahle kuch lines select karein!")
+    else:
+        st.error("Is PDF mein koi text nahi mila. Kya ye scanned image hai?")
