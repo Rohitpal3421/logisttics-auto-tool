@@ -1,7 +1,1 @@
-streamlit
-pandas
-pdfplumber
-pymupdf
-pypdf
-xlsxwriter
-openpyxl
+pip install flask pdfplumber
