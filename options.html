@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Select PDF Data</title>
+    <style>
+        body { font-family: sans-serif; padding: 30px; background: #fafafa; }
+        .list-container { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); max-width: 800px; margin: auto; }
+        .line-item { padding: 10px; border-bottom: 1px solid #eee; display: flex; align-items: center; }
+        .line-item:hover { background: #f9f9f9; }
+        input[type="checkbox"] { margin-right: 15px; transform: scale(1.2); }
+        .header { position: sticky; top: 0; background: white; padding: 10px 0; border-bottom: 2px solid #007bff; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
+        button { background: #28a745; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <div class="list-container">
+        <form action="/extract" method="post">
+            <div class="header">
+                <h3>PDF ka data select karein</h3>
+                <button type="submit">Data Extract Karein</button>
+            </div>
+            {% for line in lines %}
+            <div class="line-item">
+                <input type="checkbox" name="selected_data" value="{{ line }}">
+                <label>{{ line }}</label>
+            </div>
+            {% endfor %}
+        </form>
+    </div>
+</body>
+</html>
